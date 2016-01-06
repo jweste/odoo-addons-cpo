@@ -23,22 +23,21 @@
 
 from lxml import etree
 
-from openerp import SUPERUSER_ID
-from openerp.osv.orm import Model
-from openerp.osv import fields
+from openerp import models, fields, api, SUPERUSER_ID, _
 from openerp.osv.orm import setup_modifiers
-import openerp.addons.decimal_precision as dp
+from openerp.addons import decimal_precision as dp
 
 
-class product_supplierinfo(Model):
+class ProductSupplierinfo(models.Model):
     _inherit = 'product.supplierinfo'
 
+    @api.model
     def fields_view_get(
-            self, cr, uid, view_id=None, view_type='form', context=None,
+            self, view_id=None, view_type='form',
             toolbar=False, submenu=False):
-        context = context and context or {}
-        res = super(product_supplierinfo, self).fields_view_get(
-            cr, uid, view_id=view_id, view_type=view_type, context=context,
+#        context = context and context or {}
+        res = super(ProductSupplierinfo, self).fields_view_get(
+            view_id=view_id, view_type=view_type,
             toolbar=toolbar, submenu=False)
         if view_type == 'form':
             doc = etree.XML(res['arch'])
@@ -50,35 +49,27 @@ class product_supplierinfo(Model):
         return res
 
     # Columns section
-    _columns = {
-        'package_qty': fields.float(
-            'Package Qty', digits_compute=dp.get_precision('Product UoM'),
-            help="""The quantity of products in the supplier package."""
-            """ You will always have to buy a multiple of this quantity."""),
-        'indicative_package': fields.boolean(
-            'Indicative Package',
-            help="""If checked, the system will not force you to purchase"""
-            """a strict multiple of package quantity"""),
-    }
-
-    _defaults = {
-        'package_qty': 1,
-        'indicative_package': False,
-    }
+    package_qty = fields.Float(
+        'Package Qty', digits_compute=dp.get_precision('Product UoM'),
+        help="""The quantity of products in the supplier package."""
+        """ You will always have to buy a multiple of this quantity.""",
+        default=1)
+    indicative_package = fields.Boolean(
+        'Indicative Package',
+        help="""If checked, the system will not force you to purchase"""
+        """a strict multiple of package quantity""",
+        default=False)
 
     # Constraints section
-    def _check_package_qty(self, cr, uid, ids, context=None):
-        for psi in self.browse(cr, uid, ids, context=context):
+    @api.multi
+    @api.constrains('package_qty')
+    def _check_package_qty(self):
+        for psi in self:
             if psi.package_qty == 0:
-                return False
-        return True
-
-    _constraints = [
-        (_check_package_qty, 'Error: The package quantity cannot be 0.',
-            ['package_qty']),
-    ]
+                raise ValueError(_('The package quantity cannot be 0.'))
 
     # Init section
+    #TODO
     def _init_package_qty(self, cr, uid, ids=None, context=None):
         psi_ids = self.search(cr, SUPERUSER_ID, [], context=context)
         for psi in self.browse(cr, SUPERUSER_ID, psi_ids, context=context):

@@ -24,17 +24,18 @@
 from math import ceil
 
 from openerp.osv.osv import except_osv
-from openerp.osv.orm import Model
-from openerp.tools.translate import _
+from openerp import api, fields, models, _
 
 
-class PurchaseOrderLine(Model):
+class PurchaseOrderLine(models.Model):
     _inherit = 'purchase.order.line'
 
     # Constraints section
     # TODO: Rewrite me in _contraint, if the Orm V8 allows param in message.
-    def _check_purchase_qty(self, cr, uid, ids, context=None):
-        for pol in self.browse(cr, uid, ids, context=context):
+    @api.one
+    @api.constrains('order_id', 'product_id', 'product_qty')
+    def _check_purchase_qty(self):
+        for pol in self:
             if pol.order_id.state not in ('draft', 'sent'):
                 continue
             if not pol.product_id:
@@ -64,39 +65,31 @@ class PurchaseOrderLine(Model):
                             """ \n - Unit Price: %s;""" % (
                                 pol.product_id.name, pol.product_qty,
                                 pol.price_unit)))
-        return True
 
-    def create(self, cr, uid, vals, context=None):
-        res = super(PurchaseOrderLine, self).create(
-            cr, uid, vals, context=context)
-        self._check_purchase_qty(cr, uid, [res], context=context)
+    @api.model
+    def create(self, vals):
+        res = super(PurchaseOrderLine, self).create(vals)
+        self._check_purchase_qty([res])
         return res
 
-    def write(self, cr, uid, ids, vals, context=None):
-        res = super(PurchaseOrderLine, self).write(
-            cr, uid, ids, vals, context=context)
-        self._check_purchase_qty(cr, uid, ids, context=context)
+    @api.multi
+    def write(self, vals):
+        res = super(PurchaseOrderLine, self).write(vals)
+        self._check_purchase_qty()
         return res
 
     # Views section
-    def onchange_product_id(
-            self, cr, uid, ids, pricelist_id, product_id, qty, uom_id,
-            partner_id, date_order=False, fiscal_position_id=False,
-            date_planned=False, name=False, price_unit=False, context=None):
-        res = super(PurchaseOrderLine, self).onchange_product_id(
-            cr, uid, ids, pricelist_id, product_id, qty, uom_id, partner_id,
-            date_order=date_order, fiscal_position_id=fiscal_position_id,
-            date_planned=date_planned, name=name, price_unit=price_unit,
-            context=context)
-        if product_id:
-            product_obj = self.pool.get('product.product')
-            product = product_obj.browse(cr, uid, product_id, context=context)
+    @api.onchange('product_qty', 'product_uom')
+    def onchange_product_qty(self):
+        res = {}
+        if self.product_id:
+            product = self.product_id
             for supplier in product.seller_ids:
-                if partner_id and (supplier.name.id == partner_id):
-                    package_qty = supplier.package_qty
-                    indicative = supplier.indicative_package
-                    if (not(indicative) and
-                            int(qty / package_qty) != qty / package_qty):
+                if self.partner_id and (supplier.name == self.partner_id):
+                    self.package_qty = supplier.package_qty
+                    self.indicative = supplier.indicative_package
+                    if (not(self.indicative) and
+                            int(self.product_qty / self.package_qty) != self.product_qty / self.package_qty):
                         res['warning'] = {
                             'title': _('Warning!'),
                             'message': _(
@@ -104,6 +97,5 @@ class PurchaseOrderLine(Model):
                                 """this product by %s %s""") % (
                                 supplier.package_qty,
                                 supplier.product_uom.name)}
-                        qty = ceil(qty / package_qty) * package_qty
-                        res['value'].update({'product_qty': qty})
+                        self.product_qty = ceil(self.product_qty / self.package_qty) * self.package_qty
         return res
